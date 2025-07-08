@@ -1,0 +1,32 @@
+image:
+  repository: "{{ .Values.awsAccountId }}.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo"  # Змінено
+  tag: latest
+
+awsAccountId: ""
+
+service:
+  type: LoadBalancer
+  port: 80
+
+replicaCount: 2
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  cpuUtilization: 70
+
+env:
+  DJANGO_SECRET_KEY: "secret"
+  DJANGO_DEBUG: "True"
+  ALLOWED_HOSTS: "*"
+
+region: "us-east-1"
+
+postgresql:
+  enabled: true
+  host: "db"
+  port: "5432"
+  db: "postgres"
+  user: "postgres"
+  password: "postgres"

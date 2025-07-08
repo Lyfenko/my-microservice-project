@@ -1,0 +1,14 @@
+# charts/django-app/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: django-config
+data:
+  DJANGO_SECRET_KEY: {{ .Values.env.DJANGO_SECRET_KEY | quote }}
+  DJANGO_DEBUG: {{ .Values.env.DJANGO_DEBUG | quote }}
+  DB_NAME: {{ .Values.postgresql.db | quote }}
+  DB_USER: {{ .Values.postgresql.user | quote }}
+  DB_PASSWORD: {{ .Values.postgresql.password | quote }}
+  DB_HOST: {{ .Values.postgresql.host | quote }}
+  DB_PORT: {{ .Values.postgresql.port | quote }}
+  ALLOWED_HOSTS: {{ .Values.env.ALLOWED_HOSTS | quote }}
