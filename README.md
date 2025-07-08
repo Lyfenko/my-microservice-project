@@ -18,8 +18,6 @@
 
 ## ⚙️ Архітектура
 
-![System Architecture Diagram](https://via.placeholder.com/800x400?text=System+Architecture+Diagram)
-
 ```
 AWS Infrastructure (Terraform)
 ├── VPC (Public/Private Subnets)
