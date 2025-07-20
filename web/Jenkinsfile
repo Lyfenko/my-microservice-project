@@ -1,0 +1,61 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+            apiVersion: v1
+            kind: Pod
+            spec:
+              containers:
+              - name: kaniko
+                image: gcr.io/kaniko-project/executor:debug
+                command:
+                - /busybox/cat
+                tty: true
+              - name: git
+                image: alpine/git
+                command:
+                - cat
+                tty: true
+            '''
+        }
+    }
+    environment {
+        ECR_REGISTRY = "216612008115.dkr.ecr.us-east-1.amazonaws.com"
+        ECR_REPO     = "lesson7-django-repo"
+        IMAGE_TAG    = "${BUILD_NUMBER}"
+        GIT_REPO     = "https://github.com/Lyfenko/my-microservice-project.git"
+        GIT_BRANCH   = "main"
+    }
+    stages {
+        stage('Build Docker Image') {
+            steps {
+                container('kaniko') {
+                    withCredentials([usernamePassword(credentialsId: 'aws-credentials', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                        sh """
+                        /kaniko/executor --context `pwd` --dockerfile `pwd`/Dockerfile --destination=${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                        """
+                    }
+                }
+            }
+        }
+        stage('Update Helm Chart') {
+            steps {
+                container('git') {
+                    withCredentials([usernamePassword(credentialsId: 'git-credentials', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD')]) {
+                        sh """
+                        git clone ${GIT_REPO} helm-repo
+                        cd helm-repo
+                        git checkout ${GIT_BRANCH}
+                        sed -i 's/tag: .*/tag: ${IMAGE_TAG}/' charts/django-app/values.yaml
+                        git config user.email "jenkins@example.com"
+                        git config user.name "Jenkins"
+                        git add charts/django-app/values.yaml
+                        git commit -m "Update image tag to ${IMAGE_TAG}"
+                        git push https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Lyfenko/my-microservice-project.git ${GIT_BRANCH}
+                        """
+                    }
+                }
+            }
+        }
+    }
+}
