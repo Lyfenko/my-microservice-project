@@ -133,4 +133,29 @@ if [ -f backend.tf.temp_bak ]; then
     rm backend.tf.temp_bak
 fi
 
+echo "--- Етап 4: Розгортання RDS ---"
+
+# Генерація випадкових креденшалів
+DB_NAME="appdb_${BUILD_NUMBER}"
+DB_USER="admin_${BUILD_NUMBER}"
+DB_PASSWORD=$(openssl rand -base64 16)
+
+echo "Планування розгортання RDS..."
+terraform apply -target=module.rds -auto-approve \
+  -var="db_name=$DB_NAME" \
+  -var="db_user=$DB_USER" \
+  -var="db_password=$DB_PASSWORD" || {
+    echo "Помилка: Застосування RDS не вдалося."
+    exit 1
+}
+
+# Отримання RDS endpoint
+RDS_ENDPOINT=$(terraform output -raw rds_endpoint)
+
+echo "Оновлення values.yaml з RDS конфігурацією..."
+sed -i '' "s/DB_HOST: .*/DB_HOST: \"$RDS_ENDPOINT\"/" charts/django-app/values.yaml
+sed -i '' "s/DB_NAME: .*/DB_NAME: \"$DB_NAME\"/" charts/django-app/values.yaml
+sed -i '' "s/DB_USER: .*/DB_USER: \"$DB_USER\"/" charts/django-app/values.yaml
+sed -i '' "s/DB_PASSWORD: .*/DB_PASSWORD: \"$DB_PASSWORD\"/" charts/django-app/values.yaml
+
 echo "Розгортання завершено!"
