@@ -1,8 +1,6 @@
 image:
-  repository: "{{ .Values.awsAccountId }}.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo"  # Змінено
+  repository: "216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo"
   tag: latest
-
-awsAccountId: ""
 
 service:
   type: LoadBalancer
@@ -21,11 +19,9 @@ env:
   DJANGO_DEBUG: "True"
   ALLOWED_HOSTS: "*"
 
-region: "us-east-1"
-
 postgresql:
-  enabled: true
-  host: "db"
+  enabled: false
+  host: "prod-db.cwxgmq8gqhxc.us-east-1.rds.amazonaws.com"
   port: "5432"
   db: "postgres"
   user: "postgres"
