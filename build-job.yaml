@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-django-image
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - name: dind
+        image: docker:dind
+        securityContext:
+          privileged: true
+        env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+        volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run
+      - name: build
+        image: docker:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          apk add --no-cache git aws-cli
+          git clone https://github.com/Lyfenko/my-microservice-project.git
+          cd my-microservice-project
+          docker build -t 216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo:latest .
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 216612008115.dkr.ecr.us-east-1.amazonaws.com
+          docker push 216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo:latest
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: secret-access-key
+        volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run
+      volumes:
+      - name: docker-sock
+        emptyDir: {}
+      restartPolicy: Never
+  backoffLimit: 1
