@@ -126,63 +126,171 @@ kubectl apply -f charts/django-app/argocd-application.yaml || { echo "Помил
 
 # --- Етап 4: Розгортання RDS ---
 echo "--- Етап 4: Розгортання RDS ---"
-# Генерація випадкових креденшалів
-DB_NAME="appdb_${BUILD_NUMBER:-$(date +%s)}"
-DB_USER="admin_${BUILD_NUMBER:-$(date +%s)}"
+DB_NAME="appdb_$(date +%s)"
+DB_USER="admin_$(date +%s)"
 DB_PASSWORD=$(openssl rand -base64 16)
+
+echo "DB_PASSWORD=$DB_PASSWORD" > db_credentials.txt
+
+echo "Ініціалізація Terraform..."
+terraform init || { echo "Помилка: ініціалізація Terraform не вдалася."; exit 1; }
+
+if aws rds describe-db-subnet-groups --db-subnet-group-name prod-db-subnet-group --region us-east-1 &> /dev/null; then
+  echo "DB Subnet Group prod-db-subnet-group вже існує."
+  SUBNET_VPC=$(aws rds describe-db-subnet-groups --db-subnet-group-name prod-db-subnet-group --region us-east-1 --query 'DBSubnetGroups[0].VpcId' --output text)
+  TF_VPC="vpc-05e145f791ff59f9b"
+  if [ "$SUBNET_VPC" != "$TF_VPC" ] && [ "$SUBNET_VPC" != "None" ]; then
+    echo "Помилка: prod-db-subnet-group прив’язана до іншої VPC ($SUBNET_VPC)."
+    if aws rds describe-db-instances --region us-east-1 --query 'DBInstances[?DBSubnetGroup.DBSubnetGroupName==`prod-db-subnet-group`]' | grep -q '"DBInstanceIdentifier"'; then
+      echo "Помилка: prod-db-subnet-group використовується. Оновіть main.tf."
+      exit 1
+    else
+      echo "Видаляємо prod-db-subnet-group..."
+      aws rds delete-db-subnet-group --db-subnet-group-name prod-db-subnet-group --region us-east-1
+      terraform state rm module.rds.aws_db_subnet_group.default
+    fi
+  else
+    echo "Імпортуємо prod-db-subnet-group..."
+    terraform import module.rds.aws_db_subnet_group.default prod-db-subnet-group
+  fi
+else
+  echo "DB Subnet Group prod-db-subnet-group не існує."
+fi
+
+if aws rds describe-db-parameter-groups --db-parameter-group-name prod-db-param-group --region us-east-1 &> /dev/null; then
+  echo "DB Parameter Group prod-db-param-group вже існує."
+  terraform import module.rds.aws_db_parameter_group.default prod-db-param-group
+else
+  echo "DB Parameter Group prod-db-param-group не існує."
+fi
 
 echo "Планування розгортання RDS..."
 terraform apply -target=module.rds -auto-approve \
   -var="db_name=$DB_NAME" \
-  -var="username=$DB_USER" \
-  -var="password=$DB_PASSWORD" || {
-    echo "Помилка: Застосування RDS не вдалося."
-    exit 1
-}
+  -var="db_user=$DB_USER" \
+  -var="db_password=$DB_PASSWORD" || { echo "Помилка: Застосування RDS не вдалося."; exit 1; }
 
-# Отримання RDS endpoint
 RDS_ENDPOINT=$(terraform output -raw rds_endpoint | cut -d':' -f1)
 
-echo "Оновлення values.yaml з RDS конфігурацією..."
+echo "Оновлення values.yaml..."
 sed -i '' "s|host: .*|host: \"$RDS_ENDPOINT\"|" charts/django-app/values.yaml
 sed -i '' "s|db: .*|db: \"$DB_NAME\"|" charts/django-app/values.yaml
 sed -i '' "s|user: .*|user: \"$DB_USER\"|" charts/django-app/values.yaml
 sed -i '' "s|password: .*|password: \"$DB_PASSWORD\"|" charts/django-app/values.yaml
 
-echo "Коміт змін до values.yaml..."
+echo "Виправлення імені образу..."
+sed -i '' 's|{{ .Values.awsAccountId }}.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo|216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo|' charts/django-app/values.yaml
+sed -i '' 's|.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo|216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo|' charts/django-app/values.yaml
+sed -i '' '/awsAccountId:/d' charts/django-app/values.yaml
+
+echo "Обробка backend.tf..."
+if [ -f backend.tf ]; then
+  echo "Додавання backend.tf до репозиторію..."
+  git add backend.tf
+  git commit -m "Додавання backend.tf для Terraform" || echo "Немає змін для коміту"
+fi
+
+echo "Перевірка гілки..."
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  echo "Перемикаємося на main і зливаємо $CURRENT_BRANCH..."
+  git checkout main
+  git merge $CURRENT_BRANCH || { echo "Помилка: не вдалося злити $CURRENT_BRANCH у main."; exit 1; }
+fi
+
+echo "Коміт змін..."
 git config user.email "jenkins@example.com"
 git config user.name "Jenkins"
 git add charts/django-app/values.yaml
-git commit -m "Update RDS configuration in values.yaml" || echo "No changes to commit"
-git push https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Lyfenko/my-microservice-project.git main
+git commit -m "Оновлення RDS і конфігурації" || echo "Немає змін для коміту"
 
-echo "Очікування синхронізації ArgoCD..."
-kubectl -n argocd wait --for=condition=Synced application django-app --timeout=300s
-
-if [ -f backend.tf.temp_bak ]; then
-    rm backend.tf.temp_bak
+if [ -z "$GIT_USERNAME" ] || [ -z "$GIT_PASSWORD" ]; then
+  echo "Помилка: GIT_USERNAME або GIT_PASSWORD не встановлені."
+  exit 1
 fi
+echo "Відправлення до GitHub..."
+git push https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Lyfenko/my-microservice-project.git main || { echo "Помилка: git push не вдався."; exit 1; }
+
+echo "Локальна побудова Docker-образу..."
+docker build -t 216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo:latest . || { echo "Помилка: не вдалося побудувати образ."; exit 1; }
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 216612008115.dkr.ecr.us-east-1.amazonaws.com || { echo "Помилка: не вдалося авторизуватися в ECR."; exit 1; }
+docker push 216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo:latest || { echo "Помилка: не вдалося запушити образ."; exit 1; }
+
+echo "Перевірка образу в ECR..."
+if aws ecr describe-images --repository-name lesson7-django-repo --region us-east-1 | grep -q '"imageTag": "latest"'; then
+  echo "Образ lesson7-django-repo:latest знайдено в ECR."
+else
+  echo "Помилка: образ lesson7-django-repo:latest відсутній у ECR."
+  exit 1
+fi
+
+echo "Створення ECR секрету..."
+kubectl create secret docker-registry ecr-secret \
+  --docker-server=216612008115.dkr.ecr.us-east-1.amazonaws.com \
+  --docker-username=AWS \
+  --docker-password=$(aws ecr get-login-password --region us-east-1) \
+  --namespace default || echo "Секрет ecr-secret вже існує"
+
+echo "Додавання imagePullSecrets до Deployment..."
+kubectl patch deployment django-app -n default -p '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"ecr-secret"}]}}}}' || echo "Не вдалося додати imagePullSecrets"
+
+echo "Видалення застарілих ресурсів..."
+kubectl delete pod -l app=django-app -n default --ignore-not-found
+kubectl delete service db -n default --ignore-not-found
+kubectl delete deployment postgres -n default --ignore-not-found
+
+echo "Очищення кешу ArgoCD..."
+kubectl -n argocd delete pod -l app.kubernetes.io/name=argocd-application-controller -n argocd || echo "Не вдалося перезапустити контролер"
+kubectl -n argocd delete pod -l app.kubernetes.io/name=argocd-repo-server -n argocd || echo "Не вдалося перезапустити repo-server"
+
+echo "Перевірка конфігурації ArgoCD..."
+kubectl get application django-app -n argocd -o jsonpath='{.spec.source.repoURL}' | grep -q "https://github.com/Lyfenko/my-microservice-project.git" || {
+  echo "Оновлення repoURL..."
+  kubectl -n argocd patch application django-app -p '{"spec":{"source":{"repoURL":"https://github.com/Lyfenko/my-microservice-project.git","targetRevision":"main"}}}' --type merge
+}
+
+echo "Примусова синхронізація ArgoCD..."
+kubectl -n argocd patch application django-app -p '{"spec":{"syncPolicy":{"syncOptions":["PruneLast=true","Force=true","ApplyOutOfSyncOnly=false"]}}}' --type merge
+kubectl -n argocd wait --for=condition=Synced application django-app --timeout=900s || {
+  echo "Помилка: ArgoCD не синхронізувався."
+  kubectl describe application django-app -n argocd
+  kubectl get pods -n default
+  kubectl logs -l app.kubernetes.io/name=argocd-application-controller -n argocd --tail 100
+  exit 1
+}
+
+echo "Перевірка стану django-app..."
+if kubectl get application django-app -n argocd -o jsonpath='{.status.health.status}' | grep -q "Healthy"; then
+  echo "django-app у стані Healthy."
+else
+  echo "Помилка: django-app у стані Degraded."
+  kubectl get pods -n default
+  for pod in $(kubectl get pods -n default -o name); do
+    echo "Логи для $pod:"
+    kubectl logs $pod -n default || echo "Не вдалося отримати логи"
+  done
+  exit 1
+fi
+
+echo "Планування Monitoring..."
+terraform plan -out=tfplan_monitoring -target=module.monitoring || { echo "Помилка: Планування Monitoring не вдалося."; exit 1; }
+
+echo "Розгортання Monitoring..."
+terraform apply "tfplan_monitoring" || { echo "Помилка: Застосування Monitoring не вдалося."; exit 1; }
 
 echo "Розгортання завершено!"
 
-# --- Перевірка стану ресурсів ---
-echo "Перевірка стану ресурсів у просторах імен:"
+echo "Перевірка ресурсів:"
 echo "Jenkins:"
 kubectl get all -n jenkins
-echo "Argo CD:"
+echo "ArgoCD:"
 kubectl get all -n argocd
 echo "Monitoring:"
 kubectl get all -n monitoring
+echo "Django App:"
+kubectl get all -n default
 
-# --- Інструкції для доступу до сервісів ---
-echo "Для доступу до Jenkins виконайте:"
-echo "kubectl port-forward svc/jenkins 8080:8080 -n jenkins"
-echo "Потім відкрийте http://localhost:8080"
-
-echo "Для доступу до Argo CD виконайте:"
-echo "kubectl port-forward svc/argocd-server 8081:443 -n argocd"
-echo "Потім відкрийте https://localhost:8081"
-
-echo "Для доступу до Grafana виконайте:"
-echo "kubectl port-forward svc/grafana 3000:80 -n monitoring"
-echo "Потім відкрийте http://localhost:3000"
+echo "Інструкції для доступу:"
+echo "Jenkins: kubectl port-forward svc/jenkins 8080:8080 -n jenkins; http://localhost:8080"
+echo "ArgoCD: kubectl port-forward svc/argocd-server 8082:443 -n argocd; https://localhost:8082"
+echo "Grafana: kubectl port-forward svc/grafana 3000:80 -n monitoring; http://localhost:3000"
