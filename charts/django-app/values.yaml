@@ -1,5 +1,5 @@
 image:
-  repository: "{{ .Values.awsAccountId }}.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo"
+  repository: "{{ .Values.awsAccountId }}dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo"
   tag: latest
 
 awsAccountId: "216612008115"
