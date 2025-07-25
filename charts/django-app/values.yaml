@@ -1,5 +1,5 @@
 image:
-  repository: "216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo"
+  repository: "216612008115216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo"
   tag: latest
 
 region: "us-east-1"
@@ -25,6 +25,6 @@ postgresql:
   enabled: false
   host: "prod-db.cwxgmq8gqhxc.us-east-1.rds.amazonaws.com"
   port: "5432"
-  db: "appdb_1753434223"
-  user: "admin_1753434223"
-  password: "MlgqnP0Y4Zfp+WMeoM35tQ=="
+  db: "appdb_1753463128"
+  user: "admin_1753463128"
+  password: "rJfszAU1QGTqU+fE+JHXQQ=="
