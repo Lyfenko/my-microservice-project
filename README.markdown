@@ -14,6 +14,8 @@
 - **Jenkins**: Побудова та пуш Docker-образів, оновлення Helm-чарту.
 - **ArgoCD**: Автоматична синхронізація змін із Git у кластері.
 - **AWS RDS**: Універсальний модуль для створення Aurora Cluster або стандартного RDS.
+- **Prometheus/Grafana**: Моніторинг стану кластера та додатка.
+- **HPA**: Горизонтальне автомасштабування Django-додатка.
 
 **Репозиторій**: [https://github.com/Lyfenko/my-microservice-project.git](https://github.com/Lyfenko/my-microservice-project.git) (гілка: `lesson-db-module`)
 
@@ -30,60 +32,37 @@ my-microservice-project/
 ├── init.sh                 # Скрипт для ініціалізації та розгортання
 ├── Jenkinsfile             # Jenkins-конвеєр для CI/CD
 ├── charts/
-│   └── django-app/         # Helm-чарт для Django-додатка
-│       ├── Chart.yaml      # Метаданий чарту
-│       ├── values.yaml     # Налаштування (образ, сервіс тощо)
-│       ├── templates/
-│       │   ├── deployment.yaml       # Deployment для Django
-│       │   ├── service.yaml          # Сервіс LoadBalancer
-│       │   ├── configmap.yaml        # Змінні середовища
-│       │   ├── hpa.yaml              # Горизонтальне автоскейлінг
-│       │   ├── postgres-deployment.yaml  # Deployment для PostgreSQL
-│       │   └── postgres-service.yaml     # Сервіс для PostgreSQL
+│   ├── django-app/         # Helm-чарт для Django-додатка
+│   │   ├── Chart.yaml      # Метаданий чарту
+│   │   ├── values.yaml     # Налаштування (образ, сервіс, RDS)
+│   │   ├── templates/
+│   │   │   ├── configmap.yaml        # Змінні середовища
+│   │   │   ├── deployment.yaml       # Deployment для Django
+│   │   │   ├── service.yaml          # Сервіс LoadBalancer
+│   │   │   ├── hpa.yaml              # Горизонтальне автоскейлінг
+│   │   │   └── argocd-application.yaml  # ArgoCD Application
+│   ├── monitoring/         # Helm-чарт для Prometheus і Grafana
+│   │   ├── Chart.yaml      # Метаданий чарту
+│   │   ├── values.yaml     # Налаштування Prometheus/Grafana
+│   │   ├── templates/
+│   │   │   ├── namespace.yaml        # Простір імен monitoring
+│   │   │   ├── prometheus.yaml       # Deployment/Service для Prometheus
+│   │   │   └── grafana.yaml          # Deployment/Service для Grafana
 ├── web/goit/               # Джерельний код Django
-│   ├── __init__.py
-│   ├── asgi.py
-│   ├── settings.py
-│   ├── urls.py
-│   ├── wsgi.py
-├── Dockerfile              # Dockerfile для Django-додатка
-├── requirements.txt        # Залежності Python
+│   ├── Dockerfile          # Dockerfile для Django-додатка
+│   ├── requirements.txt    # Залежності Python
+│   ├── manage.py           # Скрипт керування Django
 ├── modules/
 │   ├── s3-backend/         # S3 та DynamoDB для стану Terraform
-│   │   ├── s3.tf
-│   │   ├── dynamodb.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   ├── vpc/                # VPC та мережеві ресурси
-│   │   ├── vpc.tf
-│   │   ├── routes.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
+│   ├── vpc/                # VPC, підмережі, NAT Gateway
 │   ├── ecr/                # Репозиторій ECR
-│   │   ├── ecr.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   ├── eks/                # EKS-кластер
-│   │   ├── eks.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   ├── rds/                # Універсальний модуль RDS
-│   │   ├── rds.tf          # Стандартний RDS
-│   │   ├── aurora.tf       # Aurora Cluster
-│   │   ├── shared.tf       # Спільні ресурси (Subnet Group, Security Group, Parameter Group)
-│   │   ├── variables.tf    # Змінні для конфігурації RDS
-│   │   └── outputs.tf      # Виводи RDS (ендпоінт, порт тощо)
+│   ├── eks/                # EKS-кластер і node group
+│   ├── rds/                # Універсальний модуль RDS (PostgreSQL)
 │   ├── jenkins/            # Helm-встановлення Jenkins
-│   │   ├── jenkins.tf
-│   │   ├── providers.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   └── argocd/             # Helm-встановлення ArgoCD
-│       ├── argocd.tf
-│       ├── providers.tf
-│       ├── variables.tf
-│       └── outputs.tf
-└── README.md               # Документація проєкту
+│   ├── argocd/             # Helm-встановлення ArgoCD
+│   ├── monitoring/         # Helm-встановлення Prometheus/Grafana
+├── storageclass.yaml       # StorageClass для EBS
+└── README.markdown         # Документація проєкту
 ```
 
 ---
@@ -177,6 +156,7 @@ module "rds" {
 
 **Примітка**: Змінна `parameters` за замовчуванням включає:
 ```hcl
+
 [
   { name = "max_connections", value = "100" },
   { name = "log_statement", value = "all" },
@@ -214,6 +194,7 @@ module "rds" {
 - **argocd CLI**: Опціонально, для ручного керування ArgoCD.
 - **Docker**: Для локальної побудови образів.
 - **GitHub Token**: Для доступу Jenkins до репозиторію.
+- **argocd CLI**: Опціонально, для ручного керування ArgoCD.
 
 ### Розгортання інфраструктури з Terraform
 
@@ -221,15 +202,28 @@ module "rds" {
    ```bash
    git clone https://github.com/Lyfenko/my-microservice-project.git
    cd my-microservice-project
-   git checkout lesson-db-module
+   git checkout final_project
    ```
-
+   
+**Налаштуйте змінні середовища:**
+```
+export GIT_USERNAME=<ваш_GitHub_користувач>
+export GIT_PASSWORD=<ваш_GitHub_токен>
+```
 2. **Виконайте скрипт ініціалізації**:
    ```bash
    chmod +x init.sh
    ./init.sh
    ```
-   Скрипт `init.sh` створює S3-бекенд, VPC, EKS, ECR, RDS, встановлює Jenkins і ArgoCD, а також застосовує ArgoCD Application.
+   Скрипт створює:
+
+    S3-бакет і DynamoDB для Terraform state.
+    VPC, EKS, ECR, RDS.
+    Jenkins, ArgoCD, Prometheus/Grafana через Helm.
+    Застосовує ArgoCD Application для Django-додатка.
+    Оновлює charts/django-app/values.yaml із RDS-параметрами.
+    Будує та пушить Docker-образ у ECR.
+
 
 3. **Перевірте виводи Terraform**:
    ```bash
@@ -311,7 +305,7 @@ module "rds" {
      django-app   Synced        Healthy
      ```
 
-3. **Перевірка Django-додатка**:
+3. cПеревірка Django-додатка**:
    - Перевірте поди:
      ```bash
      kubectl get pods -n default
@@ -325,6 +319,20 @@ module "rds" {
      **Приклад**: `http://afc50e85cfd3c4819b529dcfeefb6a6f-681129598.us-east-1.elb.amazonaws.com:80`
    - Відкрийте URL у браузері.
 
+```Prometheus/Grafana:```
+
+```Перевірте ресурси:```
+   
+ ``` bash
+
+kubectl get all -n monitoring
+```
+
+```Доступ до Grafana:```
+``` bash
+kubectl port-forward svc/grafana 3000:80 -n monitoring
+Відкрийте: http://localhost:3000 (логін: admin, пароль: prom-operator).
+```
 ---
 
 ## 🔄 Схема CI/CD конвеєра
