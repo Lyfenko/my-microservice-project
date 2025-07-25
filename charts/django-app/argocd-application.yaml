@@ -7,7 +7,7 @@ spec:
   project: default
   source:
     repoURL: 'https://github.com/Lyfenko/my-microservice-project.git'
-    targetRevision: HEAD
+    targetRevision: main
     path: charts/django-app
     helm:
       valueFiles:
@@ -19,3 +19,6 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - Validate=true

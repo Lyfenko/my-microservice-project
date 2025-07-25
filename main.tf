@@ -64,3 +64,52 @@ module "argocd" {
   source              = "./modules/argocd"
   eks_cluster_endpoint = module.eks.cluster_endpoint
 }
+
+module "monitoring" {
+  source              = "./modules/monitoring"
+  eks_cluster_endpoint = module.eks.cluster_endpoint
+}
+
+module "rds" {
+  source = "./modules/rds"
+
+  use_aurora  = false
+  identifier  = "prod-db"
+  engine      = "postgres"
+  db_name     = var.db_name
+  username    = var.db_user
+  password    = var.db_password
+  vpc_id      = module.vpc.vpc_id
+  subnet_ids  = module.vpc.private_subnet_ids
+  allowed_cidr_blocks = [module.vpc.vpc_cidr_block]
+
+  parameters = [
+    {
+      name  = "max_connections"
+      value = "200"
+    },
+    {
+      name  = "log_statement"
+      value = "ddl"
+    }
+  ]
+
+  tags = {
+    Environment = "production"
+    Project     = "my-microservice"
+  }
+
+  depends_on = [module.vpc, module.eks]
+}
+
+variable "db_name" {
+  type = string
+}
+
+variable "db_user" {
+  type = string
+}
+
+variable "db_password" {
+  type = string
+}

@@ -16,6 +16,11 @@ pipeline {
                 command:
                 - cat
                 tty: true
+              - name: kubectl
+                image: bitnami/kubectl:latest
+                command:
+                - cat
+                tty: true
             '''
         }
     }
@@ -50,10 +55,21 @@ pipeline {
                         git config user.email "jenkins@example.com"
                         git config user.name "Jenkins"
                         git add charts/django-app/values.yaml
-                        git commit -m "Update image tag to ${IMAGE_TAG}"
+                        git commit -m "Update image tag to ${IMAGE_TAG}" || echo "No changes to commit"
                         git push https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Lyfenko/my-microservice-project.git ${GIT_BRANCH}
                         """
                     }
+                }
+            }
+        }
+        stage('Trigger ArgoCD Sync') {
+            steps {
+                container('kubectl') {
+                    sh """
+                    sleep 10
+                    kubectl -n argocd patch app django-app --type merge -p '{"spec":{"syncPolicy":{"syncOptions":["ApplyOutOfSyncOnly=true"]}}}'
+                    kubectl -n argocd wait --for=condition=Synced application django-app --timeout=300s
+                    """
                 }
             }
         }

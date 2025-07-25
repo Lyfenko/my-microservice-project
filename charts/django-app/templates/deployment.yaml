@@ -13,18 +13,15 @@ spec:
         app: django-app
     spec:
       initContainers:
-        - name: wait-for-db
-          image: busybox:1.28
-          command: [ 'sh', '-c', 'until nc -z db 5432 -w 2; do echo "Waiting for PostgreSQL..."; sleep 5; done; echo "PostgreSQL ready!";' ]
         - name: run-migrations
-          image: "{{ .Values.awsAccountId }}.dkr.ecr.{{ .Values.region }}.amazonaws.com/lesson7-django-repo:latest"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           command: ['sh', '-c', 'python manage.py migrate']
           envFrom:
             - configMapRef:
                 name: django-config
       containers:
         - name: django
-          image: "{{ .Values.awsAccountId }}.dkr.ecr.{{ .Values.region }}.amazonaws.com/lesson7-django-repo:latest"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           ports:
             - containerPort: 8000
           envFrom:
@@ -33,8 +30,10 @@ spec:
           resources:
             requests:
               cpu: 100m
+              memory: 128Mi
             limits:
               cpu: 200m
+              memory: 256Mi
           livenessProbe:
             httpGet:
               path: /health/
