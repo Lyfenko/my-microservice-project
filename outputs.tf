@@ -14,7 +14,6 @@ output "eks_cluster_endpoint" {
   value = module.eks.cluster_endpoint
 }
 
-# Додати до існуючих output
 output "rds_endpoint" {
   description = "RDS connection endpoint"
   value       = module.rds.endpoint

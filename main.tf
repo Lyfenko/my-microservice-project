@@ -13,7 +13,6 @@ terraform {
 
 provider "aws" {
   region = "us-east-1"
-  version = "~> 6.3"
 }
 
 provider "helm" {
@@ -66,10 +65,15 @@ module "argocd" {
   eks_cluster_endpoint = module.eks.cluster_endpoint
 }
 
+module "monitoring" {
+  source              = "./modules/monitoring"
+  eks_cluster_endpoint = module.eks.cluster_endpoint
+}
+
 module "rds" {
   source = "./modules/rds"
 
-  use_aurora  = false # Set to true for Aurora
+  use_aurora  = false
   identifier  = "prod-db"
   engine      = "postgres"
   db_name     = var.db_name
@@ -94,9 +98,10 @@ module "rds" {
     Environment = "production"
     Project     = "my-microservice"
   }
+
+  depends_on = [module.vpc, module.eks]
 }
 
-# Додати нові змінні
 variable "db_name" {
   type = string
 }
@@ -106,6 +111,5 @@ variable "db_user" {
 }
 
 variable "db_password" {
-  type      = string
-  sensitive = true
+  type = string
 }

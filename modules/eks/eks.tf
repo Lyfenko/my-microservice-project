@@ -35,14 +35,6 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSClusterPolicy" {
   role       = aws_iam_role.eks_cluster_role.name
 }
 
-output "cluster_name" {
-  value = aws_eks_cluster.this.name
-}
-
-output "cluster_endpoint" {
-  value = aws_eks_cluster.this.endpoint
-}
-
 resource "aws_iam_role" "nodes" {
   name = "${var.cluster_name}-nodes-role"
 
@@ -78,6 +70,26 @@ resource "aws_iam_role_policy_attachment" "nodes_AmazonEBSCSIDriverPolicy" {
   role       = aws_iam_role.nodes.name
 }
 
+resource "aws_iam_role_policy" "ecr_pull_policy" {
+  name = "${var.cluster_name}-ecr-pull-policy"
+  role = aws_iam_role.nodes.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability"
+        ]
+        Resource = "arn:aws:ecr:${var.region}:216612008115:repository/lesson7-django-repo"
+      }
+    ]
+  })
+}
+
 resource "aws_eks_node_group" "nodes" {
   cluster_name    = aws_eks_cluster.this.name
   node_group_name = "main"
@@ -111,4 +123,17 @@ resource "aws_eks_node_group" "nodes" {
     create = "40m"
     delete = "40m"
   }
+}
+
+variable "region" {
+  type    = string
+  default = "us-east-1"
+}
+
+output "cluster_name" {
+  value = aws_eks_cluster.this.name
+}
+
+output "cluster_endpoint" {
+  value = aws_eks_cluster.this.endpoint
 }

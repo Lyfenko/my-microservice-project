@@ -10,7 +10,7 @@ TFSTATE_KEY="lesson-5/terraform.tfstate"
 echo "Отримання ID облікового запису AWS..."
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 if [ -z "$ACCOUNT_ID" ]; then
-  echo "Помилка: Не вдалося отримати ID облікового запису AWS. Перевірте свої AWS CLI налаштування."
+  echo "Помилка: Не вдалося отримати ID облікового запису AWS."
   exit 1
 fi
 
@@ -25,9 +25,7 @@ helm repo update
 echo "Helm-репозиторії оновлено!"
 
 # --- Етап 1: Створення S3-бакету та таблиці DynamoDB ---
-
 echo "--- Етап 1: Створення S3-бакету та таблиці DynamoDB ---"
-
 echo "Очищення попередніх артефактів Terraform..."
 rm -rf .terraform .terraform.lock.hcl tfplan_backend tfplan_main tfplan_helm
 rm -f backend.tf.temp_bak main.tf.bak outputs.tf.bak
@@ -59,9 +57,7 @@ echo "Планування та застосування створення S3-�
 terraform apply -target=module.s3_backend_bootstrap -auto-approve -no-color || { echo "Помилка: Примусове застосування для створення ресурсів бекенду не вдалося."; exit 1; }
 
 # --- Етап 2: Налаштування основного бекенду та розгортання інфраструктури ---
-
 echo "--- Етап 2: Налаштування основного бекенду та розгортання інфраструктури ---"
-
 echo "Заповнення backend.tf для повної конфігурації бекенду..."
 cat <<EOF > backend.tf
 terraform {
@@ -124,38 +120,69 @@ echo "Запуск terraform apply для розгортання Helm-реліз
 terraform apply "tfplan_helm" || { echo "Помилка: Застосування Helm-релізів не вдалося."; exit 1; }
 
 # --- Етап 3: Застосування Argo CD Application ---
-
 echo "--- Етап 3: Налаштування EKS та Helm ---"
 echo "Застосування Argo CD Application..."
 kubectl apply -f charts/django-app/argocd-application.yaml || { echo "Помилка: Не вдалося застосувати Argo CD Application."; exit 1; }
 
-if [ -f backend.tf.temp_bak ]; then
-    rm backend.tf.temp_bak
-fi
-
+# --- Етап 4: Розгортання RDS ---
 echo "--- Етап 4: Розгортання RDS ---"
-
 # Генерація випадкових креденшалів
-DB_NAME="appdb_${BUILD_NUMBER}"
-DB_USER="admin_${BUILD_NUMBER}"
+DB_NAME="appdb_${BUILD_NUMBER:-$(date +%s)}"
+DB_USER="admin_${BUILD_NUMBER:-$(date +%s)}"
 DB_PASSWORD=$(openssl rand -base64 16)
 
 echo "Планування розгортання RDS..."
 terraform apply -target=module.rds -auto-approve \
   -var="db_name=$DB_NAME" \
-  -var="db_user=$DB_USER" \
-  -var="db_password=$DB_PASSWORD" || {
+  -var="username=$DB_USER" \
+  -var="password=$DB_PASSWORD" || {
     echo "Помилка: Застосування RDS не вдалося."
     exit 1
 }
 
 # Отримання RDS endpoint
-RDS_ENDPOINT=$(terraform output -raw rds_endpoint)
+RDS_ENDPOINT=$(terraform output -raw rds_endpoint | cut -d':' -f1)
 
 echo "Оновлення values.yaml з RDS конфігурацією..."
-sed -i '' "s/DB_HOST: .*/DB_HOST: \"$RDS_ENDPOINT\"/" charts/django-app/values.yaml
-sed -i '' "s/DB_NAME: .*/DB_NAME: \"$DB_NAME\"/" charts/django-app/values.yaml
-sed -i '' "s/DB_USER: .*/DB_USER: \"$DB_USER\"/" charts/django-app/values.yaml
-sed -i '' "s/DB_PASSWORD: .*/DB_PASSWORD: \"$DB_PASSWORD\"/" charts/django-app/values.yaml
+sed -i '' "s|host: .*|host: \"$RDS_ENDPOINT\"|" charts/django-app/values.yaml
+sed -i '' "s|db: .*|db: \"$DB_NAME\"|" charts/django-app/values.yaml
+sed -i '' "s|user: .*|user: \"$DB_USER\"|" charts/django-app/values.yaml
+sed -i '' "s|password: .*|password: \"$DB_PASSWORD\"|" charts/django-app/values.yaml
+
+echo "Коміт змін до values.yaml..."
+git config user.email "jenkins@example.com"
+git config user.name "Jenkins"
+git add charts/django-app/values.yaml
+git commit -m "Update RDS configuration in values.yaml" || echo "No changes to commit"
+git push https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Lyfenko/my-microservice-project.git main
+
+echo "Очікування синхронізації ArgoCD..."
+kubectl -n argocd wait --for=condition=Synced application django-app --timeout=300s
+
+if [ -f backend.tf.temp_bak ]; then
+    rm backend.tf.temp_bak
+fi
 
 echo "Розгортання завершено!"
+
+# --- Перевірка стану ресурсів ---
+echo "Перевірка стану ресурсів у просторах імен:"
+echo "Jenkins:"
+kubectl get all -n jenkins
+echo "Argo CD:"
+kubectl get all -n argocd
+echo "Monitoring:"
+kubectl get all -n monitoring
+
+# --- Інструкції для доступу до сервісів ---
+echo "Для доступу до Jenkins виконайте:"
+echo "kubectl port-forward svc/jenkins 8080:8080 -n jenkins"
+echo "Потім відкрийте http://localhost:8080"
+
+echo "Для доступу до Argo CD виконайте:"
+echo "kubectl port-forward svc/argocd-server 8081:443 -n argocd"
+echo "Потім відкрийте https://localhost:8081"
+
+echo "Для доступу до Grafana виконайте:"
+echo "kubectl port-forward svc/grafana 3000:80 -n monitoring"
+echo "Потім відкрийте http://localhost:3000"
