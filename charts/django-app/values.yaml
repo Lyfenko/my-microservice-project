@@ -1,5 +1,5 @@
 image:
-  repository: "216612008115216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo"
+  repository: "216612008115.dkr.ecr.us-east-1.amazonaws.com/lesson7-django-repo"
   tag: latest
 
 region: "us-east-1"
