@@ -57,5 +57,14 @@ pipeline {
                 }
             }
         }
+        stage('Trigger ArgoCD Sync') {
+            steps {
+                container('git') {
+                    sh """
+                    kubectl -n argocd patch app django-app --type merge -p '{"spec":{"syncPolicy":{"syncOptions":["ApplyOutOfSyncOnly=true"]}}}'
+                    """
+                }
+            }
+        }
     }
 }
